@@ -23,15 +23,34 @@ import (
 	"sync"
 )
 
+// Size units
+const (
+	KB = 1024
+	MB = 1024 * KB
+	GB = 1024 * MB
+)
+
+// Defaults options.
+const (
+	DefaultFragmentsThreshold = 1 * MB
+)
+
+// Options is the options to open Stack.
+type Options struct {
+	FragmentsThreshold int
+}
+
 // Stack is the disk-based stack abstraction.
 type Stack struct {
 	file   *os.File
 	offset int64
-	lock   sync.RWMutex // protects offset
+	frags  int          // fragments size
+	lock   sync.RWMutex // protects offset, frags
+	opts   *Options
 }
 
 // Open opens or creates a Stack for given path,  will be created if not exist.
-func Open(path string) (*Stack, error) {
+func Open(path string, opts *Options) (*Stack, error) {
 	// Open or create the file.
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, os.FileMode(0644))
 	if err != nil {
@@ -50,7 +69,10 @@ func Open(path string) (*Stack, error) {
 		}
 		offset = int64(binary.BigEndian.Uint64(b))
 	}
-	return &Stack{file: file, offset: offset}, nil
+	if opts == nil {
+		opts = &Options{DefaultFragmentsThreshold}
+	}
+	return &Stack{file: file, offset: offset, opts: opts}, nil
 }
 
 // Put an item onto the Stack.
@@ -65,6 +87,9 @@ func (s *Stack) Put(data []byte) (err error) {
 		return
 	}
 	s.offset += int64(len(buf))
+	if s.frags > len(buf) {
+		s.frags -= len(buf)
+	}
 	return
 }
 
@@ -76,6 +101,10 @@ func (s *Stack) Pop() (data []byte, err error) {
 		return
 	}
 	s.offset -= int64(len(data)) + 4 + 8
+	s.frags += len(data) + 4 + 8
+	if s.frags >= s.opts.FragmentsThreshold {
+		err = s.compact()
+	}
 	return
 }
 
@@ -112,4 +141,9 @@ func (s *Stack) Close() (err error) {
 	}
 	s.offset = 0
 	return
+}
+
+// compact truncates the file if the fragments is greater than the threshold.
+func (s *Stack) compact() error {
+	return s.file.Truncate(s.offset)
 }

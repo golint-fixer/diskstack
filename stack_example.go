@@ -12,7 +12,7 @@ import (
 
 func main() {
 	// Open stack on disk.
-	s, err := diskstack.Open("stack.db")
+	s, err := diskstack.Open("stack.db", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
