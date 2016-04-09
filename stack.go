@@ -21,7 +21,6 @@ package diskstack
 
 import (
 	"encoding/binary"
-	"errors"
 	"os"
 	"sync"
 )
@@ -43,13 +42,6 @@ const (
 // Default options.
 const (
 	DefaultFragmentsThreshold int64 = 512 * MB
-	DefaultSizeLimit          int64 = 16 * GB
-)
-
-// Errors
-var (
-	ErrSizeLimit   = errors.New("diskstack: size limit")
-	ErrFileInvalid = errors.New("diskstack: invalid file")
 )
 
 // Options is the options to open Stack.
@@ -57,10 +49,6 @@ type Options struct {
 	// FragmentsThreshold is the fragments size threshold to trigger the
 	// file compaction.
 	FragmentsThreshold int64
-	// SizeLimit is the file size limitation, operation Put returns
-	// ErrSizeLimit if the file size is greater than this value.
-	// Negative number means no size limitation.
-	SizeLimit int64
 }
 
 // Stack is the disk-based stack abstraction.
@@ -81,19 +69,10 @@ func Open(path string, opts *Options) (s *Stack, err error) {
 		return
 	}
 	// Create Stack.
-	options := &Options{
-		FragmentsThreshold: DefaultFragmentsThreshold,
-		SizeLimit:          DefaultSizeLimit,
+	if opts == nil {
+		opts = &Options{DefaultFragmentsThreshold}
 	}
-	if opts != nil {
-		if opts.FragmentsThreshold != 0 {
-			options.FragmentsThreshold = opts.FragmentsThreshold
-		}
-		if opts.SizeLimit != 0 {
-			options.SizeLimit = opts.SizeLimit
-		}
-	}
-	s = &Stack{opts: options, file: file}
+	s = &Stack{opts: opts, file: file}
 	// Get file size.
 	info, err := file.Stat()
 	if err != nil {
@@ -101,10 +80,6 @@ func Open(path string, opts *Options) (s *Stack, err error) {
 	}
 	fileSize := info.Size()
 	if fileSize < headSize {
-		if fileSize != 0 {
-			err = ErrFileInvalid // invalid small file
-			return
-		}
 		if err = s.file.Truncate(0); err != nil {
 			// Force truncate the file to be empty.
 			return
@@ -127,7 +102,7 @@ func Open(path string, opts *Options) (s *Stack, err error) {
 	}
 	s.length = int(binary.BigEndian.Uint32(b))
 	// Frags
-	if err = s.truncate(); err != nil { // Remove the fragements
+	if err = s.safeTruncate(); err != nil { // Remove the fragements
 		return
 	}
 	s.frags = 0
@@ -138,13 +113,10 @@ func Open(path string, opts *Options) (s *Stack, err error) {
 func (s *Stack) Put(data []byte) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if s.opts.SizeLimit > 0 && s.offset >= s.opts.SizeLimit {
-		return ErrSizeLimit
-	}
 	buf := make([]byte, len(data)+4)
 	copy(buf, data)                                                // data
 	binary.BigEndian.PutUint32(buf[len(data):], uint32(len(data))) // size
-	if _, err = s.file.WriteAt(buf, s.offset); err != nil {
+	if err = s.safeWriteAt(buf); err != nil {
 		return
 	}
 	s.offset += int64(len(buf))
@@ -212,13 +184,13 @@ func (s *Stack) Pop() (data []byte, err error) {
 func (s *Stack) Clear() (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.frags = s.offset - 8 - 4
-	s.offset = 8 + 4
+	s.frags = s.offset - headSize
+	s.offset = headSize
 	s.length = 0
 	if err = s.writeHead(); err != nil {
 		return
 	}
-	return s.truncate()
+	return s.safeTruncate()
 }
 
 // Close the Stack.
@@ -234,27 +206,45 @@ func (s *Stack) Close() (err error) {
 // compact truncates the file if the fragments is greater than the threshold.
 func (s *Stack) compact() (err error) {
 	if s.frags >= s.opts.FragmentsThreshold {
-		return s.truncate()
+		return s.safeTruncate()
 	}
 	return nil
 }
 
 // truncate the file to size the offset.
-func (s *Stack) truncate() (err error) {
-	if s.opts.SizeLimit > 0 && s.offset >= s.opts.SizeLimit {
-		// Important: truncate with large size cause unexcepted no-space left error!
-		return ErrSizeLimit
+func (s *Stack) safeTruncate() (err error) {
+	offset := s.offset
+	endOffset, err := s.file.Seek(0, os.SEEK_END)
+	if err != nil {
+		return err
 	}
-	return s.file.Truncate(s.offset)
+	if endOffset < s.offset {
+		offset = endOffset
+	}
+	return s.file.Truncate(offset)
 }
 
 // writeHead writes the head.
 func (s *Stack) writeHead() (err error) {
-	b := make([]byte, 8+4)
+	b := make([]byte, headSize)
 	binary.BigEndian.PutUint64(b, uint64(s.offset))
-	binary.BigEndian.PutUint32(b[8:], uint32(s.length))
+	binary.BigEndian.PutUint32(b[offsetSize:], uint32(s.length))
 	if _, err = s.file.WriteAt(b, 0); err != nil {
 		return err
 	}
 	return nil
+}
+
+// safeWriteAt writes bytes at offset safely.
+func (s *Stack) safeWriteAt(b []byte) (err error) {
+	offset := s.offset
+	endOffset, err := s.file.Seek(0, os.SEEK_END)
+	if err != nil {
+		return err
+	}
+	if endOffset < s.offset {
+		offset = endOffset
+	}
+	_, err = s.file.WriteAt(b, offset)
+	return
 }
