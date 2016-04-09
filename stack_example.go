@@ -24,6 +24,7 @@ func main() {
 	s.Put(data1)
 	log.Printf("Put %v\n", data2)
 	s.Put(data2)
+	log.Printf("Items count: %d\n", s.Len())
 	// Pop items.
 	for i := 0; i < 2; i++ {
 		data, err := s.Pop()

@@ -25,8 +25,8 @@ func TestOpenEmpty(t *testing.T) {
 	Must(t, s != nil)
 	defer os.Remove(fileName)
 	info, err := os.Stat(fileName)
-	// Must be an empty file
-	Must(t, err == nil && info.Size() == 0)
+	// Must size be 4+8
+	Must(t, err == nil && info.Size() == headSize)
 }
 
 func TestReOpen(t *testing.T) {
@@ -41,7 +41,7 @@ func TestReOpen(t *testing.T) {
 	// Reopen.
 	s, _ = Open(fileName, nil)
 	// Must offset be correct.
-	Must(t, s.offset == int64(len(data))+4+8)
+	Must(t, s.offset == int64(len(data))+4+8+4)
 }
 
 func TestTopEmpty(t *testing.T) {
@@ -96,48 +96,51 @@ func TestOperationsBetweenOpens(t *testing.T) {
 	Must(t, s.Put(data1) == nil)
 	Must(t, s.Put(data2) == nil)
 	Must(t, s.Put(data3) == nil)
+	Must(t, s.Len() == 3)
+	// Pop one. offset should persist between opens.
+	s.Pop()
 	// Close.
 	s.Close()
 	// Reopen.
 	s, _ = Open(fileName, nil)
+	// Must length be persist
+	Must(t, s.Len() == 2)
 	// Must offset be correct.
-	Must(t, s.offset == 3*(int64(len(data1))+4+8))
+	Must(t, s.offset == int64(headSize+s.Len()*(4+4)))
 	// Pops should be correct.
 	data, err := s.Pop()
-	Must(t, err == nil && bytes.Compare(data, data3) == 0)
+	Must(t, err == nil && bytes.Compare(data, data2) == 0 && s.Len() == 1)
 	data, err = s.Pop()
-	Must(t, err == nil && bytes.Compare(data, data2) == 0)
+	Must(t, err == nil && bytes.Compare(data, data1) == 0 && s.Len() == 0)
 	data, err = s.Pop()
-	Must(t, err == nil && bytes.Compare(data, data1) == 0)
-	data, err = s.Pop()
-	Must(t, err == nil && bytes.Compare(data, nil) == 0)
+	Must(t, err == nil && bytes.Compare(data, nil) == 0 && s.Len() == 0)
 }
 
 func TestCompact(t *testing.T) {
 	fileName := "stack.db"
-	s, _ := Open(fileName, &Options{FragmentsThreshold: 64})
+	s, _ := Open(fileName, &Options{FragmentsThreshold: 48})
 	defer os.Remove(fileName)
 	// Put some items.
-	data := []byte{1, 2, 3, 4}
+	data := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	for i := 0; i < 6; i++ {
 		s.Put(data)
-	} // (4+4+8) x 6 = 96 bytes
+	} // (4+8)+(8+4)*6=84
 	// Must file size is excepted
 	info, _ := os.Stat(fileName)
-	except := int64((4 + 4 + 8) * 6)
+	except := int64((4 + 8) + (4+8)*6)
 	Must(t, info.Size() == except)
 	// Pop some items.
 	for i := 0; i < 4; i++ {
 		s.Pop()
 		if i < 3 {
-			// Must not compact for first 3 times
+			// Must no compaction for first 3 times
 			info, _ = os.Stat(fileName)
 			Must(t, info.Size() == except)
 		}
-	} // Poped (4+4+8) x 4 = 64 bytes
+	} // Poped (8+4) x 4 = 48 bytes
 	// Must be compacted now.
 	info, _ = os.Stat(fileName)
-	Must(t, info.Size() == (6-4)*(4+4+8))
+	Must(t, info.Size() == (4+8)+2*(8+4))
 	// Put/Pop should work fine after the compaction.
 	data1 := []byte{5, 6, 7, 8}
 	Must(t, s.Put(data1) == nil)
@@ -160,12 +163,27 @@ func TestClear(t *testing.T) {
 	Must(t, s.Clear() == nil)
 	// Must file be cleared.
 	info, _ := os.Stat(fileName)
-	Must(t, info.Size() == 0)
+	Must(t, info.Size() == headSize)
 	// Must offset be 0
-	Must(t, s.offset == 0)
+	Must(t, s.offset == headSize)
 	// Pop should be nil.
 	v, _ := s.Pop()
 	Must(t, v == nil)
+	// Length must be 0
+	Must(t, s.Len() == 0)
+}
+
+func TestLen(t *testing.T) {
+	fileName := "stack.db"
+	s, _ := Open(fileName, &Options{FragmentsThreshold: 64})
+	defer os.Remove(fileName)
+	// Put some items.
+	n := 1024
+	data := []byte{1, 2, 3, 4}
+	for i := 0; i < n; i++ {
+		s.Put(data)
+	}
+	Must(t, s.Len() == 1024)
 }
 
 func BenchmarkPut(b *testing.B) {
