@@ -141,6 +141,7 @@ func TestCompact(t *testing.T) {
 	// Must be compacted now.
 	info, _ = os.Stat(fileName)
 	Must(t, info.Size() == (4+8)+2*(8+4))
+	Must(t, s.frags == 0)
 	// Put/Pop should work fine after the compaction.
 	data1 := []byte{5, 6, 7, 8}
 	Must(t, s.Put(data1) == nil)

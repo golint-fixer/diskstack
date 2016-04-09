@@ -17,6 +17,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.Close()
+	// Top item.
+	data, err := s.Top()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Top %v\n", data)
 	// Put items.
 	data1 := []byte{'A', 'B', 'C'}
 	data2 := []byte{'a', 'b', 'c'}
@@ -25,12 +31,10 @@ func main() {
 	log.Printf("Put %v\n", data2)
 	s.Put(data2)
 	log.Printf("Items count: %d\n", s.Len())
-	// Pop items.
-	for i := 0; i < 2; i++ {
-		data, err := s.Pop()
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("Pop %v\n", data)
+	// Pop item.
+	data, err = s.Pop()
+	if err != nil {
+		log.Fatal(err)
 	}
+	log.Printf("Pop %v\n", data)
 }
