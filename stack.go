@@ -17,7 +17,6 @@ Design
 	| ...              |      |
 
 */
-
 package diskstack
 
 import (
