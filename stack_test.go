@@ -147,6 +147,27 @@ func TestCompact(t *testing.T) {
 	Must(t, err == nil && bytes.Compare(v, data) == 0)
 }
 
+func TestClear(t *testing.T) {
+	fileName := "stack.db"
+	s, _ := Open(fileName, &Options{FragmentsThreshold: 64})
+	defer os.Remove(fileName)
+	// Put some items.
+	data := []byte{1, 2, 3, 4}
+	for i := 0; i < 1024; i++ {
+		s.Put(data)
+	}
+	// Clear
+	Must(t, s.Clear() == nil)
+	// Must file be cleared.
+	info, _ := os.Stat(fileName)
+	Must(t, info.Size() == 0)
+	// Must offset be 0
+	Must(t, s.offset == 0)
+	// Pop should be nil.
+	v, _ := s.Pop()
+	Must(t, v == nil)
+}
+
 func BenchmarkPut(b *testing.B) {
 	fileName := "stack.db"
 	s, _ := Open(fileName, nil)

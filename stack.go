@@ -132,6 +132,14 @@ func (s *Stack) top() (data []byte, err error) {
 	return
 }
 
+// Clear the stack.
+func (s *Stack) Clear() (err error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.offset = 0
+	return s.compact()
+}
+
 // Close the stack.
 func (s *Stack) Close() (err error) {
 	s.lock.Lock()
